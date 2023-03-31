@@ -8,12 +8,11 @@ This guide covers the configuration and usage of a video streaming service that 
 
 ### Install
 
-To use this video streaming service, you must first install ffmpeg and v4l-utils. You can do so with the following commands:
+To use this video streaming service, you must first install `ffmpeg`, `v4l-utils`. You can do so with the following commands:
 
 ```sh
 sudo apt install ffmpeg
 sudo apt install v4l-utils
-sudo apt-get install vainfo
 ```
 
 List devices:
@@ -43,15 +42,25 @@ Test the input source with ffplay
 ffplay -f v4l2 -i /dev/video0
 ```
 
-## Test hardware acceleration
+## Hardware acceleration
 
-The following command will display information about the VA-API (Video Acceleration API) driver and hardware acceleration support on your system. If the output shows `VAProfileH264` or `VAProfileMPEG4` (or any other supported video codec) and the `VAEntrypointEncSlice` entry point (or any other supported entry point), it means that hardware acceleration is available and working on your system.
+### Getting started with VA-API
+
+VA-API (Video Acceleration API) is a video acceleration API for Linux that allows video decoding, encoding, and processing to be offloaded to specialized hardware video decoding/encoding processors. It is typically installed by default on most modern Linux distributions.
+
+To check if VA-API is installed on your system, open a terminal and run the following command:ecialized hardware video decoding/encoding processors (such as Intel Quick Sync Video).
 
 ```sh
 vainfo
 ```
 
+This command displays information about the VA-API driver and hardware acceleration support on your system. If the output shows VAProfileH264 or VAProfileMPEG4 (or any other supported video codec) and the VAEntrypointEncSlice entry point (or any other supported entry point), it means that hardware acceleration is available and working on your system.
+
 If you don't see any output or an error message saying "libva error: /dev/dri/renderD128: cannot open", it means that hardware acceleration is not available on your system, or you may need to install additional drivers or libraries.
+
+```sh
+sudo apt-get install vainfo
+```
 
 Otherwise, if the execution of `vainfo` shows you a list as following:
 
@@ -63,21 +72,21 @@ libva info: va_openDriver() returns 0
 vainfo: VA-API version: 1.14 (libva 2.12.0)
 vainfo: Driver version: Intel iHD driver for Intel(R) Gen Graphics - 22.3.1 ()
 vainfo: Supported profile and entrypoints
-      VAProfileMPEG2Simple            :	VAEntrypointVLD
-      VAProfileMPEG2Main              :	VAEntrypointVLD
-      VAProfileH264Main               :	VAEntrypointVLD
-      VAProfileH264Main               :	VAEntrypointEncSliceLP
-      VAProfileH264High               :	VAEntrypointVLD
-      VAProfileH264High               :	VAEntrypointEncSliceLP
-      VAProfileJPEGBaseline           :	VAEntrypointVLD
-      VAProfileJPEGBaseline           :	VAEntrypointEncPicture
-      VAProfileH264ConstrainedBaseline:	VAEntrypointVLD
-      VAProfileH264ConstrainedBaseline:	VAEntrypointEncSliceLP
-      VAProfileVP8Version0_3          :	VAEntrypointVLD
-      VAProfileHEVCMain               :	VAEntrypointVLD
-      VAProfileHEVCMain10             :	VAEntrypointVLD
-      VAProfileVP9Profile0            :	VAEntrypointVLD
-      VAProfileVP9Profile2            :	VAEntrypointVLD
+      VAProfileMPEG2Simple            : VAEntrypointVLD
+      VAProfileMPEG2Main              : VAEntrypointVLD
+      VAProfileH264Main               : VAEntrypointVLD
+      VAProfileH264Main               : VAEntrypointEncSliceLP
+      VAProfileH264High               : VAEntrypointVLD
+      VAProfileH264High               : VAEntrypointEncSliceLP
+      VAProfileJPEGBaseline           : VAEntrypointVLD
+      VAProfileJPEGBaseline           : VAEntrypointEncPicture
+      VAProfileH264ConstrainedBaseline: VAEntrypointVLD
+      VAProfileH264ConstrainedBaseline: VAEntrypointEncSliceLP
+      VAProfileVP8Version0_3          : VAEntrypointVLD
+      VAProfileHEVCMain               : VAEntrypointVLD
+      VAProfileHEVCMain10             : VAEntrypointVLD
+      VAProfileVP9Profile0            : VAEntrypointVLD
+      VAProfileVP9Profile2            : VAEntrypointVLD
 
 ```
 
@@ -93,43 +102,42 @@ It means, that based on your `vainfo` output, your graphics card supports hardwa
 
 You can use the appropriate codec and entry point for your use case to utilize hardware acceleration.
 
-This FFmpeg command captures video from a V4L2 device (/dev/video0), scales it to 1920x1080, converts it to the NV12 format, and uses the VA-API hardware encoder to encode it in the H.264 format with a constant quality factor of 20. The audio is copied unchanged, and the output is streamed to the console in FLV format. The piped output is then played by FFplay.
+### Capturing video using FFmpeg with VA-API hardware acceleration
+
+This command is using FFmpeg to capture video from a video4linux2 device (/dev/video0) and audio from an ALSA device (hw:CARD=S,DEV=0), and then encoding them into an FLV container format for output to a pipe.
 
 ```sh
 ffmpeg -y -hide_banner \
-    -init_hw_device vaapi=foo:/dev/dri/renderD128 -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device foo \
+    -init_hw_device vaapi=foo:/dev/dri/renderD128 \
+    -hwaccel vaapi \
+    -hwaccel_output_format vaapi \
+    -hwaccel_device foo \
     -f v4l2 -i /dev/video0 \
-    -f pulse -i alsa_input.usb-Elgato_Game_Capture_HD60_S__000615C683000-03.analog-stereo \
+    -f alsa -i hw:CARD=S,DEV=0 \
     -filter_hw_device foo \
     -vf 'scale=-1:720:force_original_aspect_ratio,fps=30,format=nv12|vaapi,hwupload' \
-    -c:v h264_vaapi -profile:v high -rc_mode CQP -qp 20 -sc_threshold 0 -g 48 -keyint_min 48 \
+    -c:v h264_vaapi -profile:v main -crf 20 -sc_threshold 0 -g 48 -keyint_min 48 \
     -c:a aac -b:a 128k \
     -f flv \
-    - | ffplay -i -
+    - \
+    | ffplay -i -
 ```
 
-- `ffmpeg`: This is the command to run the FFmpeg software.
-- `-y`: This option will automatically overwrite any existing output file without asking for confirmation.
-- `-hide_banner`: This option will hide the banner that is normally displayed when starting the FFmpeg software.
-- `-init_hw_device vaapi=foo:/dev/dri/renderD128`: This option initializes the VA-API hardware device named "foo" with the device file "/dev/dri/renderD128".
-- `-hwaccel vaapi`: This option enables hardware acceleration using the VA-API.
-- `-hwaccel_output_format vaapi`: This option sets the output format for hardware-accelerated decoding to VA-API.
-- `-hwaccel_device foo`: This option sets the hardware device to be used for hardware acceleration to "foo".
-- `-f v4l2 -i /dev/video0`: This option specifies the input format as "v4l2" and the input file as "/dev/video0", which is a video capture device.
-- `-f pulse -i alsa_input.usb-Elgato_Game_Capture_HD60_S__000615C683000-03.analog-stereo`: This option specifies the input format as "pulse" and the input file as "alsa_input.usb-Elgato_Game_Capture_HD60_S__000615C683000-03.analog-stereo", which is an audio capture device.
-- `-filter_hw_device foo`: This option sets the filter hardware device to be used to "foo".
-- `-vf 'scale=-1:720:force_original_aspect_ratio,fps=30,format=nv12|vaapi,hwupload'`: This option specifies the video filter to be applied. It scales the video to a height of 720 pixels while maintaining the original aspect ratio, sets the frame rate to 30 fps, sets the output format to NV12 or VA-API format, and performs hardware uploading.
-- `-c:v h264_vaapi`: This option specifies the video codec to be used as H.264 with VA-API hardware acceleration.
-- `-profile:v high`: This option sets the profile of the H.264 codec to "high".
-- `-rc_mode CQP`: This option sets the rate control mode to "constant quantization parameter".
-- `-qp 20`: This option sets the quantization parameter to 20.
-- `-sc_threshold 0`: This option disables scene change detection.
-- `-g 48`: This option sets the GOP size to 48.
-- `-keyint_min 48`: This option sets the minimum keyframe interval to 48.
-- `-c:a aac -b:a 128k`: This option specifies the audio codec to be used as AAC with a bitrate of 128 kbps.
-- `-f flv`: This option sets the output format to FLV.
-- `-`: This option sets the output to be sent to the standard output.
-- `ffplay -i -`: This command pipes the output of FFmpeg to the input of ffplay, which is a media player that can play the output of FFmpeg.
+The command includes several FFmpeg options and filters that are used for hardware acceleration, scaling, and encoding:
+
+- `-init_hw_device vaapi=foo:/dev/dri/renderD128`: Initializes the VAAPI (Video Acceleration API) hardware device named "foo" with the specified DRM (Direct Rendering Manager) device file.
+- `-hwaccel vaapi`: Enables VAAPI hardware acceleration for decoding video frames.
+- `-hwaccel_output_format vaapi`: Specifies the output format for hardware accelerated decoding.
+- `-hwaccel_device foo`: Specifies the hardware acceleration device to use for decoding and encoding.
+- `-f v4l2 -i /dev/video0`: Specifies the input format as video4linux2 and the input device as /dev/video0.
+- `-f alsa -i hw:CARD=S,DEV=0`: Specifies the input format as ALSA (Advanced Linux Sound Architecture) and the input device as hw:CARD=S,DEV=0, which represents the sound card with ID "S" and device ID "0".
+- `-filter_hw_device foo:` Specifies the hardware acceleration device to use for filtering.
+- `-vf 'scale=-1:720:force_original_aspect_ratio,fps=30,format=nv12|vaapi,hwupload'`: Applies a video filter to scale the input video to a height of 720 pixels, while preserving the original aspect ratio, and set the output frame rate to 30 fps. The filter also converts the pixel format to nv12 or vaapi and uses the "hwupload" option to upload the filtered frames to the hardware device.
+- `-c:v h264_vaapi -profile:v main -crf 20 -sc_threshold 0 -g 48 -keyint_min 48`: Specifies the video encoder to use as h264_vaapi and sets the H.264 profile to main. The "-crf 20" option sets the constant rate factor, which determines the video quality and file size. The "-sc_threshold 0" option disables scene detection, and the "-g 48" and "-keyint_min 48" options set the GOP (Group of Pictures) size to 48 frames and the minimum keyframe interval to 48 frames, respectively.
+- `-c:a aac -b:a 128k`: Specifies the audio encoder to use as AAC and sets the audio bitrate to 128 kbps.
+- `-f flv`: Specifies the output container format as FLV (Flash Video).
+- `-`: Writes the output to a pipe.
+- `| ffplay -i -`: Reads the output from the pipe and plays it with FFplay.
 
 ## Streaming
 
@@ -137,19 +145,24 @@ To push the output to an endpoint using HLS format:
 
 ```sh
 ffmpeg -y -hide_banner \
-    -init_hw_device vaapi=foo:/dev/dri/renderD128 -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device foo \
+    -init_hw_device vaapi=foo:/dev/dri/renderD128 \
+    -hwaccel vaapi \
+    -hwaccel_output_format vaapi \
+    -hwaccel_device foo \
     -f v4l2 -i /dev/video0 \
-    -f pulse -i alsa_input.usb-Elgato_Game_Capture_HD60_S__000615C683000-03.analog-stereo \
+    -f alsa -i hw:CARD=S,DEV=0 \
     -filter_hw_device foo \
-    -vf 'scale=-1:1080:force_original_aspect_ratio,fps=30,format=nv12|vaapi,hwupload' \
-    -c:v h264_vaapi -profile:v high -rc_mode CQP -qp 20 -sc_threshold 0 -g 48 -keyint_min 48 \
-    -c:a copy \
-    -f hls -hls_time 4 -hls_list_size 10 http://example.com/playlist.m3u8
+    -vf 'scale=-1:720:force_original_aspect_ratio,fps=30,format=nv12|vaapi,hwupload' \
+    -c:v h264_vaapi -profile:v main -crf 20 -sc_threshold 0 -g 48 -keyint_min 48 \
+    -c:a aac -b:a 128k \
+    -f hls \ 
+    -hls_time 4 \
+    -hls_list_size 10 \
+    http://example.com/playlist.m3u8
 ```
 
 This command is similar to the previous one, but with few changes:
 
-- The `-c:a` option is set to `copy`, which means the audio will be copied as-is instead of being re-encoded as AAC.
 - `-f hls` specifies the output format to be HLS.
 - `-hls_time 4` sets the target duration of each segment to 4 seconds.
 - `-hls_list_size 10` sets the maximum number of segments in the playlist to 10.
